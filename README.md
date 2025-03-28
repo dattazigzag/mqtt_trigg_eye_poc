@@ -13,3 +13,7 @@
 ![alt text](<_assets/Screenshot 2025-03-28 at 17.54.14.png>)
 
 ---
+
+## LICENSE
+
+[MIT License](LICENSE)
