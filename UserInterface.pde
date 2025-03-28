@@ -11,6 +11,7 @@ class UserInterface {
   // UI Colors
   private final color BG_COLOR = color(25);
   private final color TEXT_COLOR = color(220);
+  private final color INSTRUCTION_COLOR = color(125);
   //private final color DISABLED_COLOR = color(15);
   //private final color DIMMED_TEXT_COLOR = color(120);
 
@@ -76,13 +77,35 @@ class UserInterface {
     String clientStateLabel = "MQTT STATE: ";
     text(clientStateLabel, 12, CANVAS_HEIGHT + 38);
 
-    // Display connection status with appropriate color
+    // Display MQTT connection status with appropriate color
     if (!mqttState) {
       fill(255, 135, 76); // Orange/red for disconnected
       text("DISCONNECTED", 12 + 80, CANVAS_HEIGHT + 38);
     } else {
       fill(76, 135, 255); // Blue for connected
       text("CONNECTED", 12 + 80, CANVAS_HEIGHT + 38);
+    }
+
+    fill(TEXT_COLOR);
+    String syphonStateLabel = "SYPHON STATE: ";
+    text(syphonStateLabel, 12 + 220, CANVAS_HEIGHT + 38);
+
+    // Display SYPHON status with appropriate color
+    if (!enableSyphon) {
+      fill(255, 135, 76); // Orange/red for disconnected
+      text("NOT RUNNING", 12 + 220 + 100, CANVAS_HEIGHT + 38);
+    } else {
+      fill(76, 135, 255); // Blue for connected
+      text("SHARING", PADDING + 220 + 100, CANVAS_HEIGHT + 38);
+
+      noStroke();
+      fill(100, 50);
+      rect(0, CANVAS_HEIGHT-PADDING*2, width, CANVAS_HEIGHT-PADDING*2);
+      fill(76, 135, 255); // Blue for connected
+      String leftSyhonServerLabel = "LEFT SYPHON SERVER: " + "\"" +leftSyphonServer + "\"";
+      String rightSyhonServerLabel = "RIGHT SYPHON SERVER: " + "\""  + rightSyphonServer + "\"";
+      text(leftSyhonServerLabel, PADDING, CANVAS_HEIGHT-PADDING/2);
+      text(rightSyhonServerLabel, SINGLE_CANVAS_WIDTH + PADDING, CANVAS_HEIGHT-PADDING/2);
     }
 
     // Dividers
@@ -96,10 +119,11 @@ class UserInterface {
    * Render control instructions
    */
   private void renderControlInstructions() {
-    fill(TEXT_COLOR);
+    fill(INSTRUCTION_COLOR);
     text("PRESS 'd'/'D' to enable/disable DEBUG VIEW", 12, CANVAS_HEIGHT + 38 + 25);
     text("PRESS 'm'/'M' to mirror/sync PUPILS", 12, CANVAS_HEIGHT + 38 + 25 + 15);
-    text("PRESS '1'/'2'/'3'/'4' to make PUPILS go to extreme corners", 12, CANVAS_HEIGHT + 38 + 25 + 15 + 15);
+    text("PRESS 's'/'S' to enable/disable Syphon", 12, CANVAS_HEIGHT + 38 + 25 + 15*2);
+    text("PRESS '1'/'2'/'3'/'4' to make PUPILS go to extreme corners", 12, CANVAS_HEIGHT + 38 + 25 + 15*3);
   }
 
   /**

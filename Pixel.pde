@@ -27,6 +27,7 @@ class Pixel {
    * @param pixelColor Color to fill the pixel with
    * @param debug      Whether to show debug information
    * @param id         Pixel ID to display in debug mode
+   * ** NOTE: Unused but keeping it here for reference 
    */
   void display(color pixelColor, boolean debug, int id) {
     noStroke();
@@ -41,7 +42,33 @@ class Pixel {
     if (debug) {
       fill(255);
       textAlign(CENTER, CENTER);
-      text(id, x + 10, y + 10);
+      //text(id, x + 10, y + 10);
+      text(id, x + width/2, y + height/2);
+    }
+  }
+
+  /**
+   * Display the pixel on a PGraphics object
+   *
+   * @param pg         The PGraphics object to draw on
+   * @param pixelColor Color to fill the pixel with
+   * @param debug      Whether to show debug information
+   * @param id         Pixel ID to display in debug mode
+   */
+  void displayOnPGraphics(PGraphics pg, color pixelColor, boolean debug, int id) {
+    pg.noStroke();
+    if (debug) {
+      pg.strokeWeight(0.5);
+      pg.stroke(0);
+    }
+    pg.fill(pixelColor);
+    pg.rect(x, y, width, height);
+
+    // Draw the ID in debug mode
+    if (debug) {
+      pg.fill(255);
+      pg.textAlign(CENTER, CENTER);
+      pg.text(id, x + width/2, y + height/2);
     }
   }
 

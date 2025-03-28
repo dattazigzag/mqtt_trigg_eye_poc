@@ -2,8 +2,12 @@ import de.looksgood.ani.*;
 import mqtt.*;
 import processing.data.JSONObject;
 import controlP5.*;
+import codeanticode.syphon.*;
 
-PGraphics pg;
+
+PGraphics leftCanvasPG;
+PGraphics rightCanvasPG;
+
 
 // ===================== CONFIGURATION CONSTANTS =====================
 // Canvas and sizing constants
@@ -16,6 +20,11 @@ final int SINGLE_CANVAS_WIDTH = 320;
 final int ROWS_OF_PIXELS = 8;
 final int COLS_OF_PIXELS = 8;
 
+// Syphon configuration
+SyphonServer leftCanvasSyphonServer;
+SyphonServer rightCanvasSyphonServer;
+String leftSyphonServer = "LeftEye";
+String rightSyphonServer = "RightEye";
 
 // MQTT configuration
 final String BROKER_IP = "127.0.0.1";
@@ -74,6 +83,9 @@ boolean mqttConnected = false; // for business logic: for launch checking of bro
 boolean mqttState = true;      // for UI display of connection state
 int lastConnectionAttempt = 0;
 
+// Syphon State
+boolean enableSyphon = false;
+
 // UI reference
 UserInterface ui;
 Textarea appConsole;
@@ -109,20 +121,25 @@ void setup() {
   // Initialize UI
   ui = new UserInterface(this, 0, CANVAS_HEIGHT, SKETCH_WIDTH, RESERVED_HEIGHT);
 
+  // Initialize canvases
+  leftCanvasPG = createGraphics(SINGLE_CANVAS_WIDTH, CANVAS_HEIGHT, P3D);
+  rightCanvasPG = createGraphics(SINGLE_CANVAS_WIDTH, CANVAS_HEIGHT, P3D);
+
   // Initialize pixel grids
   initializePixelGrids();
 
   // Initialize special pixel sets
   initializeSpecialPixelSets();
 
+  // Initialize syphon servers
+  leftCanvasSyphonServer = new SyphonServer(this, leftSyphonServer);
+  rightCanvasSyphonServer = new SyphonServer(this, rightSyphonServer);
+
   // Initialize animation
   initializeAnimation();
 
   // Initialize MQTT client
   initializeMqtt();
-
-  //
-  pg = createGraphics(320, 320, P3D);
 }
 
 
@@ -131,22 +148,27 @@ void initializePixelGrids() {
   int pixelWidth = SINGLE_CANVAS_WIDTH / COLS_OF_PIXELS;
   int pixelHeight = CANVAS_HEIGHT / ROWS_OF_PIXELS;
 
-  // Create left canvas pixels
+  /* OLD */
+  //// Create left canvas pixels
+  //for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
+  //  for (int x = 0; x < SINGLE_CANVAS_WIDTH; x += pixelWidth) {
+  //    leftCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
+  //  }
+  //}
+  //// Create right canvas pixels
+  //for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
+  //  for (int x = SINGLE_CANVAS_WIDTH; x < CANVAS_WIDTH; x += pixelWidth) {
+  //    rightCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
+  //  }
+  //}
+  /* NEW */
+  /* Note:
+   * "rightCanvasPixels" are initiated and added with same location as the "leftCanvasPixels"
+   * as we will offset them with PGrpahics placemment of image later to x=SINGLE_CANVAS_WIDTH
+   */
   for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
     for (int x = 0; x < SINGLE_CANVAS_WIDTH; x += pixelWidth) {
       leftCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
-      //
-      //pg.beginDraw();
-      //pg.background(100);
-      //pg.stroke(255);
-      //pg.line(20, 20, mouseX, mouseY);
-      //pg.endDraw()
-    }
-  }
-
-  // Create right canvas pixels
-  for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
-    for (int x = SINGLE_CANVAS_WIDTH; x < CANVAS_WIDTH; x += pixelWidth) {
       rightCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
     }
   }
@@ -201,14 +223,31 @@ void draw() {
     hint(DISABLE_DEPTH_TEST);
   }
 
-  // Draw all pixels for both canvases
-  renderAllPixels();
+  //// Draw all pixels for both canvases
+  //renderAllPixels();
 
-  // Handle active pixel display based on which canvas is active
+  // Step 1: Draw base pixels to PGraphics objects (without displaying yet)
+  renderBasicPixels();
+
+  // Step 2: Handle active pixel display based on which canvas is active
   if (leftHit && !rightHit) {
     handlePixelActivation(leftCurrentId, true);
   } else if (rightHit && !leftHit) {
     handlePixelActivation(rightCurrentId, false);
+  }
+
+  // Step 3: Display the fully rendered PGraphics objects
+  image(leftCanvasPG, 0, 0);
+  image(rightCanvasPG, SINGLE_CANVAS_WIDTH, 0);
+
+  // Step 4: Send via Syphon if enabled
+  /*
+  * TBT:
+  * Add this "if (!debug && enableSyphon)" later ...
+  */
+  if (!debug && enableSyphon) {
+    leftCanvasSyphonServer.sendImage(leftCanvasPG);
+    rightCanvasSyphonServer.sendImage(rightCanvasPG);
   }
 
   // Draw separator line between left and right canvases
@@ -221,35 +260,44 @@ void draw() {
 }
 
 
-// Render all base pixels for both eyes
-void renderAllPixels() {
+
+// Render all base pixels for both eyes (without displaying)
+void renderBasicPixels() {
   // Render left canvas pixels
+  leftCanvasPG.beginDraw();
+  leftCanvasPG.background(0); // Clear the PGraphics canvas
+
   color leftColor = debug ? DEBUG_COLOR_TYPE1 : NORMAL_PIXEL_COLOR;
   for (int i = 0; i < leftCanvasPixels.size(); i++) {
-    leftCanvasPixels.get(i).display(leftColor, debug, i);
+    leftCanvasPixels.get(i).displayOnPGraphics(leftCanvasPG, leftColor, debug, i);
 
     // Apply special colors for boundary and blackout pixels
     if (debug && boundarySet.hasValue(i)) {
-      leftCanvasPixels.get(i).display(BOUNDARY_PIXEL_COLOR, debug, i);
+      leftCanvasPixels.get(i).displayOnPGraphics(leftCanvasPG, BOUNDARY_PIXEL_COLOR, debug, i);
     }
     if (backoutSet.hasValue(i)) {
-      leftCanvasPixels.get(i).display(BLACKOUT_PIXEL_COLOR, debug, i);
+      leftCanvasPixels.get(i).displayOnPGraphics(leftCanvasPG, BLACKOUT_PIXEL_COLOR, debug, i);
     }
   }
+  leftCanvasPG.endDraw();
 
   // Render right canvas pixels
+  rightCanvasPG.beginDraw();
+  rightCanvasPG.background(0); // Clear the PGraphics canvas
+
   color rightColor = debug ? DEBUG_COLOR_TYPE2 : NORMAL_PIXEL_COLOR;
   for (int i = 0; i < rightCanvasPixels.size(); i++) {
-    rightCanvasPixels.get(i).display(rightColor, debug, i);
+    rightCanvasPixels.get(i).displayOnPGraphics(rightCanvasPG, rightColor, debug, i);
 
     // Apply special colors for boundary and blackout pixels
     if (debug && boundarySet.hasValue(i)) {
-      rightCanvasPixels.get(i).display(BOUNDARY_PIXEL_COLOR, debug, i);
+      rightCanvasPixels.get(i).displayOnPGraphics(rightCanvasPG, BOUNDARY_PIXEL_COLOR, debug, i);
     }
     if (backoutSet.hasValue(i)) {
-      rightCanvasPixels.get(i).display(BLACKOUT_PIXEL_COLOR, debug, i);
+      rightCanvasPixels.get(i).displayOnPGraphics(rightCanvasPG, BLACKOUT_PIXEL_COLOR, debug, i);
     }
   }
+  rightCanvasPG.endDraw();
 }
 
 
@@ -264,9 +312,8 @@ void keyPressed() {
 
   case 's':
   case 'S':
-    syncSameDirection = !syncSameDirection;
-    syncMirroredDirection = !syncSameDirection;
-    log("EYE SYNC (Same Direction): " + (syncSameDirection ? "Enabled" : "Disabled"));
+    enableSyphon = !enableSyphon;
+    log("SYPHON: " + (enableSyphon ? "Enabled" : "Disabled"));
     break;
 
   case 'm':
@@ -274,7 +321,9 @@ void keyPressed() {
     syncMirroredDirection = !syncMirroredDirection;
     syncSameDirection = !syncMirroredDirection;
     log("EYE SYNC (Mirrored): " + (syncMirroredDirection ? "Enabled" : "Disabled"));
+    log("EYE SYNC (Same Direction): " + (syncSameDirection ? "Enabled" : "Disabled"));
     break;
+
 
   case '1':
     int targetCell1 = (random(1) > 0.5) ? 10 : 17;
@@ -310,26 +359,37 @@ int right_last_id = 0;
 
 
 void mouseMoved() {
-  // First check left canvas pixels
-  boolean pixelFound = checkCanvasPixels(leftCanvasPixels, true);
-
-  // If no pixel found in left canvas, check right canvas
-  if (!pixelFound) {
+  // First check if mouse is within left canvas area
+  if (mouseX >= 0 && mouseX < SINGLE_CANVAS_WIDTH && mouseY >= 0 && mouseY < CANVAS_HEIGHT) {
+    // Mouse is in left canvas area
+    checkCanvasPixels(leftCanvasPixels, true);
+  }
+  // Otherwise check if mouse is within right canvas area
+  else if (mouseX >= SINGLE_CANVAS_WIDTH && mouseX < CANVAS_WIDTH && mouseY >= 0 && mouseY < CANVAS_HEIGHT) {
+    // Mouse is in right canvas area
     checkCanvasPixels(rightCanvasPixels, false);
+  } else {
+    // Mouse outside of any canvas
+    leftHit = false;
+    rightHit = false;
   }
 }
 
 
 // Helper function to check if mouse is over pixels in a canvas
 boolean checkCanvasPixels(ArrayList<Pixel> canvasPixels, boolean isLeftCanvas) {
+  // Calculate mouse position relative to the canvas
+  int relativeX = mouseX - (isLeftCanvas ? 0 : SINGLE_CANVAS_WIDTH);
+  int relativeY = mouseY;
+
   for (int i = 0; i < canvasPixels.size(); i++) {
     Pixel pixel = canvasPixels.get(i);
     int[] position = pixel.getPosition();
     int[] size = pixel.getSize();
 
-    // Check if mouse is over this pixel
-    if (mouseX >= position[0] && mouseX <= position[0] + size[0] &&
-      mouseY >= position[1] && mouseY <= position[1] + size[1]) {
+    // Check if relative mouse position is over this pixel
+    if (relativeX >= position[0] && relativeX <= position[0] + size[0] &&
+      relativeY >= position[1] && relativeY <= position[1] + size[1]) {
 
       // Skip if it's a blackout or boundary pixel
       if (backoutSet.hasValue(i) || boundarySet.hasValue(i)) {
@@ -363,14 +423,21 @@ boolean checkCanvasPixels(ArrayList<Pixel> canvasPixels, boolean isLeftCanvas) {
     }
   }
 
+  // If we're checking the primary canvas and no pixel was hit,
+  // we should clear that canvas's hit state
+  if (isLeftCanvas) {
+    leftHit = false;
+  } else {
+    rightHit = false;
+  }
+
   return false; // No pixel found
 }
 
 
-// Helper function for displaying pixels with specific settings
-void displayPixel(ArrayList<Pixel> pixelArray, int pixelId, color pixelColor, boolean debugMode) {
+void displayPixel(ArrayList<Pixel> pixelArray, PGraphics pg, int pixelId, color pixelColor, boolean debugMode) {
   if (pixelId >= 0 && pixelId < pixelArray.size()) {
-    pixelArray.get(pixelId).display(pixelColor, debugMode, pixelId);
+    pixelArray.get(pixelId).displayOnPGraphics(pg, pixelColor, debugMode, pixelId);
   }
 }
 
@@ -470,10 +537,10 @@ int getMirroredPixelId(int id) {
 
 
 // Helper function to display a 2x2 block of pixels
-void display2x2Block(ArrayList<Pixel> pixelArray, int[] blockIds, color pixelColor, boolean debugMode) {
+void display2x2Block(ArrayList<Pixel> pixelArray, PGraphics pg, int[] blockIds, color pixelColor, boolean debugMode) {
   for (int id : blockIds) {
     if (id >= 0 && id < pixelArray.size() && !backoutSet.hasValue(id)) {
-      pixelArray.get(id).display(pixelColor, debugMode, id);
+      pixelArray.get(id).displayOnPGraphics(pg, pixelColor, debugMode, id);
     }
   }
 }
@@ -482,6 +549,8 @@ void display2x2Block(ArrayList<Pixel> pixelArray, int[] blockIds, color pixelCol
 void handlePixelActivation(int activeId, boolean isLeftCanvas) {
   ArrayList<Pixel> primaryCanvas = isLeftCanvas ? leftCanvasPixels : rightCanvasPixels;
   ArrayList<Pixel> secondaryCanvas = isLeftCanvas ? rightCanvasPixels : leftCanvasPixels;
+  PGraphics primaryPG = isLeftCanvas ? leftCanvasPG : rightCanvasPG;
+  PGraphics secondaryPG = isLeftCanvas ? rightCanvasPG : leftCanvasPG;
 
   // Skip if it's a blackout or boundary pixel
   if (backoutSet.hasValue(activeId) || boundarySet.hasValue(activeId)) {
@@ -492,43 +561,60 @@ void handlePixelActivation(int activeId, boolean isLeftCanvas) {
 
   // No sync mode - only activate on the primary canvas
   if (!syncSameDirection && !syncMirroredDirection) {
+    primaryPG.beginDraw();
     if (blockIds.length > 0) {
-      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+      display2x2Block(primaryCanvas, primaryPG, blockIds, ACTIVE_PIXEL_COLOR, debug);
     } else {
-      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+      displayPixel(primaryCanvas, primaryPG, activeId, ACTIVE_PIXEL_COLOR, debug);
     }
+    primaryPG.endDraw();
   }
   // Sync same mode - activate same pixels on both canvases
   else if (syncSameDirection) {
+    primaryPG.beginDraw();
     if (blockIds.length > 0) {
-      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
-      display2x2Block(secondaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+      display2x2Block(primaryCanvas, primaryPG, blockIds, ACTIVE_PIXEL_COLOR, debug);
     } else {
-      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
-      displayPixel(secondaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+      displayPixel(primaryCanvas, primaryPG, activeId, ACTIVE_PIXEL_COLOR, debug);
     }
+    primaryPG.endDraw();
+
+    secondaryPG.beginDraw();
+    if (blockIds.length > 0) {
+      display2x2Block(secondaryCanvas, secondaryPG, blockIds, ACTIVE_PIXEL_COLOR, debug);
+    } else {
+      displayPixel(secondaryCanvas, secondaryPG, activeId, ACTIVE_PIXEL_COLOR, debug);
+    }
+    secondaryPG.endDraw();
   }
   // Mirror mode - activate mirrored pixels on secondary canvas
   else if (syncMirroredDirection) {
+    primaryPG.beginDraw();
     if (blockIds.length > 0) {
-      // Primary canvas block
-      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+      display2x2Block(primaryCanvas, primaryPG, blockIds, ACTIVE_PIXEL_COLOR, debug);
+    } else {
+      displayPixel(primaryCanvas, primaryPG, activeId, ACTIVE_PIXEL_COLOR, debug);
+    }
+    primaryPG.endDraw();
 
+    secondaryPG.beginDraw();
+    if (blockIds.length > 0) {
       // Secondary canvas mirrored block
       for (int id : blockIds) {
         int mirroredId = getMirroredPixelId(id);
         if (mirroredId >= 0 && mirroredId < secondaryCanvas.size() && !backoutSet.hasValue(mirroredId)) {
-          secondaryCanvas.get(mirroredId).display(ACTIVE_PIXEL_COLOR, debug, mirroredId);
+          secondaryCanvas.get(mirroredId).displayOnPGraphics(secondaryPG, ACTIVE_PIXEL_COLOR, debug, mirroredId);
         }
       }
     } else {
-      // Just use single pixels
-      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+      // Just use single pixels for mirrored mode
       int mirroredId = getMirroredPixelId(activeId);
-      displayPixel(secondaryCanvas, mirroredId, ACTIVE_PIXEL_COLOR, debug);
+      displayPixel(secondaryCanvas, secondaryPG, mirroredId, ACTIVE_PIXEL_COLOR, debug);
     }
+    secondaryPG.endDraw();
   }
 }
+
 
 // Helper function to log pixel movements with relevant information
 void logPixelMovement(int currentId, int lastId, boolean isLeftCanvas, boolean isMirrored) {
@@ -559,7 +645,8 @@ void logPixelMovement(int currentId, int lastId, boolean isLeftCanvas, boolean i
 }
 
 
-// Enhanced animation function with validation
+
+// Animation function with validation
 void animateToCell(int targetCellId) {
   // Skip invalid cells
   if (backoutSet.hasValue(targetCellId) || boundarySet.hasValue(targetCellId)) {
@@ -584,6 +671,7 @@ void animateToCell(int targetCellId) {
   Ani.to(this, 20.0f, "cellYCurrent", targetRow, Ani.BACK_OUT, "onEnd:animationComplete");
 }
 
+
 // Animation callback for cell updates
 void updateCell() {
   // Convert floating point position to cell index
@@ -607,7 +695,7 @@ void animationComplete() {
 }
 
 
-// Improved MQTT connection function with better error handling
+// MQTT connection function with better error handling
 void connectMQTT() {
   lastConnectionAttempt = millis();
 
@@ -625,6 +713,7 @@ void connectMQTT() {
     log("Will retry in " + (CONNECTION_RETRY_INTERVAL/1000) + " seconds");
   }
 }
+
 
 // Called when MQTT client successfully connects
 void clientConnected() {
@@ -684,7 +773,6 @@ void connectionLost() {
 }
 
 
-//---------------------------- //
 // Helper method to print to console with proper logging
 void log(String message) {
   println(message);  // Still print to Processing console
