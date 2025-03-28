@@ -1,74 +1,87 @@
 import de.looksgood.ani.*;
 import mqtt.*;
 import processing.data.JSONObject;
-// ControlP5 for UI controls
 import controlP5.*;
 
-// MQTT realted
-MQTTClient client;
-String BROKER_IP = "127.0.0.1";
-String BROKER_PORT = "1883";
-String CLIENT_ID = "Processing_MQTT_EYE_Client";
-boolean mqttConnected = false; // for Business logic: for on launch checking of broker
-boolean mqttState = true; // to be used as a var for tracking state
-int lastConnectionAttempt = 0;
-int connectionRetryInterval = 2000; // Try every 2 seconds
-
-
-// Global settings
-boolean enableP3D = true;
-boolean debug = false;
-int fr = 20;  // framerate
-boolean syncS = true; // Sync movement in left and right, in same dir
-boolean syncM = false; // Sync movement in left and right, but in opp dir
-
+// ===================== CONFIGURATION CONSTANTS =====================
+// Canvas and sizing constants
 final int SKETCH_WIDTH = 640;
 final int SKETCH_HEIGHT = 550;
-final int CANVAS_WIDTH = 640;  // Using full width of the sketch
+final int CANVAS_WIDTH = 640;
 final int CANVAS_HEIGHT = 320;
 final int RESERVED_HEIGHT = 230;
-final int SINGLE_CANVAS_WIDTH = 320; // Each canvas gets half of the total width
+final int SINGLE_CANVAS_WIDTH = 320;
 final int ROWS_OF_PIXELS = 8;
 final int COLS_OF_PIXELS = 8;
 
 
-color normalPixel = color(255, 255, 255);
-color activePixelCol = color(0);
-color blackoutPixelCol = color(0);
-color boundaryPixelCol = color(255, 135, 78);
-color debugColType1 = color(255, 204, 0);
-color debugColType2 = color(255, 54, 255);
+// MQTT configuration
+final String BROKER_IP = "127.0.0.1";
+final String BROKER_PORT = "1883";
+final String CLIENT_ID = "Processing_MQTT_EYE_Client";
+final int CONNECTION_RETRY_INTERVAL = 2000; // Try every 2 seconds
 
-int[] backout_list_px_ids = {0, 1, 6, 7, 8, 15, 48, 55, 56, 57, 62, 63};
+// Console configuration
+final int CONSOLE_BUFFER_LIMIT = 100;
+
+// ===================== COLOR DEFINITIONS =====================
+final color NORMAL_PIXEL_COLOR = color(255, 255, 255);
+final color ACTIVE_PIXEL_COLOR = color(0);
+final color BLACKOUT_PIXEL_COLOR = color(0);
+final color BOUNDARY_PIXEL_COLOR = color(255, 135, 78);
+final color DEBUG_COLOR_TYPE1 = color(255, 204, 0);
+final color DEBUG_COLOR_TYPE2 = color(255, 54, 255);
+
+// ===================== PIXEL CONFIGURATION =====================
+// Pixels that are always black (corners, etc.)
+final int[] BACKOUT_PIXEL_IDS = {0, 1, 6, 7, 8, 15, 48, 55, 56, 57, 62, 63};
 IntList backoutSet = new IntList();
-int[] boundary_px_ids_list = {2, 3, 4, 5, 9, 14, 16, 23, 24, 31, 32, 39, 40, 47, 49, 54, 58, 59, 60, 61};
+
+// Boundary pixels for visual formatting
+final int[] BOUNDARY_PIXEL_IDS = {2, 3, 4, 5, 9, 14, 16, 23, 24, 31, 32, 39, 40, 47, 49, 54, 58, 59, 60, 61};
 IntList boundarySet = new IntList();
 
+// ===================== STATE VARIABLES =====================
+// Eye pixel arrays
+ArrayList<Pixel> leftCanvasPixels = new ArrayList<Pixel>();
+ArrayList<Pixel> rightCanvasPixels = new ArrayList<Pixel>();
 
-ArrayList<Pixel> left_canvas_pixels = new ArrayList<Pixel>();
-ArrayList<Pixel> right_canvas_pixels = new ArrayList<Pixel>();
+// Tracking active pixels
+int leftCurrentId = 0;
+int leftLastId = 0;
+int rightCurrentId = 0;
+int rightLastId = 0;
+boolean leftHit = false;
+boolean rightHit = false;
 
+// Mode settings
+boolean enableP3D = true;
+boolean debug = false;
+int frameRate = 20;
+boolean syncSameDirection = true;   // Sync movement in left and right, in same dir
+boolean syncMirroredDirection = false; // Sync movement in left and right, but in opp dir
 
-// Global variables for animation
+// Animation variables
 float cellXCurrent;
 float cellYCurrent;
 boolean isAnimating = false;
 
-// UI realated
-// Console configuration
-final int CONSOLE_BUFFER_LIMIT = 100; // Maximum number of lines in console before auto-clearing
-// Global reference to the console for easy access
-Textarea appConsole;
+// MQTT state
+MQTTClient mqttClient;
+boolean mqttConnected = false; // for business logic: for launch checking of broker
+boolean mqttState = true;      // for UI display of connection state
+int lastConnectionAttempt = 0;
 
+// UI reference
 UserInterface ui;
-
+Textarea appConsole;
 
 void settings() {
   if (!enableP3D) {
-    size(640, 550);  // Default renderer
+    size(SKETCH_WIDTH, SKETCH_HEIGHT);  // Default renderer
     println("[setting]\tUsing default renderer");
   } else {
-    size(640, 550, P3D);  // P3D renderer
+    size(SKETCH_WIDTH, SKETCH_HEIGHT, P3D);  // P3D renderer
     println("[setting]\tUsing P3D renderer");
   }
   smooth();
@@ -77,69 +90,98 @@ void settings() {
 
 void setup() {
   background(0);
+  frameRate(frameRate);
 
-  // Important for P3D mode - set hint to improve 2D rendering performance where appropriate
+  // Apply P3D optimizations if enabled
   if (enableP3D) {
     println("[setup]\tUsing P3D hint optimizations");
     hint(DISABLE_DEPTH_TEST);
     hint(DISABLE_TEXTURE_MIPMAPS);
   } else {
-    println("[setup]\tNot using P3D hint optimizations");
+    println("[setup]\tNot using P3D optimizations");
   }
+
+  // The below always makes the window stay on top of other windows
+  surface.setAlwaysOnTop(true);
 
   // Initialize UI
   ui = new UserInterface(this, 0, CANVAS_HEIGHT, SKETCH_WIDTH, RESERVED_HEIGHT);
 
+  // Initialize pixel grids
+  initializePixelGrids();
 
-  // Pixel stuff
-  int pixel_width = int(SINGLE_CANVAS_WIDTH/ROWS_OF_PIXELS);
-  int pixel_height = int(CANVAS_HEIGHT/COLS_OF_PIXELS);
+  // Initialize special pixel sets
+  initializeSpecialPixelSets();
 
-  // Spawnleft canvas pixels
-  for (int y = 0; y < CANVAS_HEIGHT; y += pixel_height) {
-    for (int x = 0; x < SINGLE_CANVAS_WIDTH; x += pixel_width) {
-      left_canvas_pixels.add(new Pixel(x, y, pixel_width, pixel_height));
+  // Initialize animation
+  initializeAnimation();
+
+  // Initialize MQTT client
+  initializeMqtt();
+}
+
+
+// Initialize both eye pixel grids
+void initializePixelGrids() {
+  int pixelWidth = SINGLE_CANVAS_WIDTH / COLS_OF_PIXELS;
+  int pixelHeight = CANVAS_HEIGHT / ROWS_OF_PIXELS;
+
+  // Create left canvas pixels
+  for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
+    for (int x = 0; x < SINGLE_CANVAS_WIDTH; x += pixelWidth) {
+      leftCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
     }
   }
 
-  // Spawn right canvas pixels
-  for (int y = 0; y < CANVAS_HEIGHT; y += pixel_height) {
-    for (int x = SINGLE_CANVAS_WIDTH; x < SKETCH_WIDTH; x += pixel_width) {
-      right_canvas_pixels.add(new Pixel(x, y, pixel_width, pixel_height));
+  // Create right canvas pixels
+  for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
+    for (int x = SINGLE_CANVAS_WIDTH; x < CANVAS_WIDTH; x += pixelWidth) {
+      rightCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
     }
   }
+}
 
-  // Fill in the backout set
-  for (int i=0; i<backout_list_px_ids.length; i++) {
-    backoutSet.append(backout_list_px_ids[i]);
+
+// Initialize blackout and boundary pixel sets
+void initializeSpecialPixelSets() {
+  // Initialize blackout set (pixels that are always black)
+  for (int pixelId : BACKOUT_PIXEL_IDS) {
+    backoutSet.append(pixelId);
   }
 
-  // Fill in the boundary set
-  for (int i=0; i<boundary_px_ids_list.length; i++) {
-    boundarySet.append(boundary_px_ids_list[i]);
+  // Initialize boundary set (pixels that define the eye shape)
+  for (int pixelId : BOUNDARY_PIXEL_IDS) {
+    boundarySet.append(pixelId);
   }
+}
 
+
+// Initialize animation settings
+void initializeAnimation() {
   Ani.init(this);
   Ani.setDefaultTimeMode(Ani.FRAMES);
 
   // Set initial cell position
-  cellXCurrent = left_curr_id % COLS_OF_PIXELS;
-  cellYCurrent = left_curr_id / COLS_OF_PIXELS;
+  cellXCurrent = leftCurrentId % COLS_OF_PIXELS;
+  cellYCurrent = leftCurrentId / COLS_OF_PIXELS;
+}
 
 
-  // MQTT stuff ...
-  client = new MQTTClient(this);
-  // Initial connection attempt (non-blocking)
+// Initialize MQTT client
+void initializeMqtt() {
+  mqttClient = new MQTTClient(this);
   connectMQTT();
 }
+
 
 
 
 void draw() {
   background(0);
 
-  // Check if we need to attempt reconnection
-  if (!mqttConnected && millis() - lastConnectionAttempt > connectionRetryInterval) {
+  // Check MQTT reconnection if needed
+  // Simple MQTT reconnection check - exactly as in the original
+  if (!mqttConnected && millis() - lastConnectionAttempt > CONNECTION_RETRY_INTERVAL) {
     connectMQTT();
   }
 
@@ -148,189 +190,17 @@ void draw() {
     hint(DISABLE_DEPTH_TEST);
   }
 
-  color c = normalPixel;
-  if (debug) {
-    c = debugColType1;
-  }
-  for (int i = 0; i < left_canvas_pixels.size(); i++) {
-    left_canvas_pixels.get(i).display(c, debug, i);
+  // Draw all pixels for both canvases
+  renderAllPixels();
 
-    if (debug && boundarySet.hasValue(i)) {
-      left_canvas_pixels.get(i).display(boundaryPixelCol, debug, i);
-    }
-
-    // for the left eye, keep some pixels always black
-    if (backoutSet.hasValue(i)) {
-      left_canvas_pixels.get(i).display(blackoutPixelCol, debug, i);
-    }
+  // Handle active pixel display based on which canvas is active
+  if (leftHit && !rightHit) {
+    handlePixelActivation(leftCurrentId, true);
+  } else if (rightHit && !leftHit) {
+    handlePixelActivation(rightCurrentId, false);
   }
 
-
-  c = normalPixel;
-  if (debug) {
-    c = debugColType2;
-  }
-  for (int i = 0; i < right_canvas_pixels.size(); i++) {
-    right_canvas_pixels.get(i).display(c, debug, i);
-
-    if (debug && boundarySet.hasValue(i)) {
-      right_canvas_pixels.get(i).display(boundaryPixelCol, debug, i);
-    }
-
-    // for the right eye, keep some pixels always black
-    if (backoutSet.hasValue(i)) {
-      right_canvas_pixels.get(i).display(blackoutPixelCol, debug, i);
-    }
-  }
-
-
-
-  // No sync mode with leftHit only
-  if (!syncS && !syncM && !rightHit && leftHit) {
-    if (!backoutSet.hasValue(left_curr_id) && !boundarySet.hasValue(left_curr_id)) {
-      int[] blockIds = get2x2BlockIds(left_curr_id);
-      if (blockIds.length > 0) {
-        for (int id : blockIds) {
-          if (id >= 0 && id < left_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            left_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-      } else {
-        // Fallback to just the current cell
-        left_canvas_pixels.get(left_curr_id).display(activePixelCol, debug, left_curr_id);
-      }
-    }
-  }
-
-  // No sync mode with rightHit only
-  else if (!syncS && !syncM && rightHit && !leftHit) {
-    if (!backoutSet.hasValue(right_curr_id) && !boundarySet.hasValue(right_curr_id)) {
-      int[] blockIds = get2x2BlockIds(right_curr_id);
-      if (blockIds.length > 0) {
-        for (int id : blockIds) {
-          if (id >= 0 && id < right_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            right_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-      } else {
-        // Fallback to just the current cell
-        right_canvas_pixels.get(right_curr_id).display(activePixelCol, debug, right_curr_id);
-      }
-    }
-  }
-
-  // Sync same mode with leftHit
-  else if (syncS && leftHit && !rightHit) {
-    if (!backoutSet.hasValue(left_curr_id) && !boundarySet.hasValue(left_curr_id)) {
-      int[] blockIds = get2x2BlockIds(left_curr_id);
-      if (blockIds.length > 0) {
-        for (int id : blockIds) {
-          // Left side
-          if (id >= 0 && id < left_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            left_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-          // Right side - same position
-          if (id >= 0 && id < right_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            right_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-      } else {
-        // Fallback to just the current cells
-        left_canvas_pixels.get(left_curr_id).display(activePixelCol, debug, left_curr_id);
-        if (left_curr_id < right_canvas_pixels.size() && !backoutSet.hasValue(left_curr_id)) {
-          right_canvas_pixels.get(left_curr_id).display(activePixelCol, debug, left_curr_id);
-        }
-      }
-    }
-  }
-
-  // Sync same mode with rightHit
-  else if (syncS && rightHit && !leftHit) {
-    if (!backoutSet.hasValue(right_curr_id) && !boundarySet.hasValue(right_curr_id)) {
-      int[] blockIds = get2x2BlockIds(right_curr_id);
-      if (blockIds.length > 0) {
-        for (int id : blockIds) {
-          // Right side
-          if (id >= 0 && id < right_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            right_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-          // Left side - same position
-          if (id >= 0 && id < left_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            left_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-      } else {
-        // Fallback to just the current cells
-        right_canvas_pixels.get(right_curr_id).display(activePixelCol, debug, right_curr_id);
-        if (right_curr_id < left_canvas_pixels.size() && !backoutSet.hasValue(right_curr_id)) {
-          left_canvas_pixels.get(right_curr_id).display(activePixelCol, debug, right_curr_id);
-        }
-      }
-    }
-  }
-
-  // Mirror mode with leftHit
-  else if (syncM && leftHit && !rightHit) {
-    if (!backoutSet.hasValue(left_curr_id) && !boundarySet.hasValue(left_curr_id)) {
-      int[] blockIds = get2x2BlockIds(left_curr_id);
-      if (blockIds.length > 0) {
-        // Left side block
-        for (int id : blockIds) {
-          if (id >= 0 && id < left_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            left_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-
-        // Right side mirrored block
-        for (int id : blockIds) {
-          int mirroredId = getMirroredPixelId(id);
-          if (mirroredId >= 0 && mirroredId < right_canvas_pixels.size() && !backoutSet.hasValue(mirroredId)) {
-            right_canvas_pixels.get(mirroredId).display(activePixelCol, debug, mirroredId);
-          }
-        }
-      } else {
-        // Fallback to just the current cell and its mirror
-        left_canvas_pixels.get(left_curr_id).display(activePixelCol, debug, left_curr_id);
-        int mirroredId = getMirroredPixelId(left_curr_id);
-        if (mirroredId >= 0 && mirroredId < right_canvas_pixels.size() && !backoutSet.hasValue(mirroredId)) {
-          right_canvas_pixels.get(mirroredId).display(activePixelCol, debug, mirroredId);
-        }
-      }
-    }
-  }
-
-  // Mirror mode with rightHit
-  else if (syncM && rightHit && !leftHit) {
-    if (!backoutSet.hasValue(right_curr_id) && !boundarySet.hasValue(right_curr_id)) {
-      int[] blockIds = get2x2BlockIds(right_curr_id);
-      if (blockIds.length > 0) {
-        // Right side block
-        for (int id : blockIds) {
-          if (id >= 0 && id < right_canvas_pixels.size() && !backoutSet.hasValue(id)) {
-            right_canvas_pixels.get(id).display(activePixelCol, debug, id);
-          }
-        }
-
-        // Left side mirrored block
-        for (int id : blockIds) {
-          int mirroredId = getMirroredPixelId(id);
-          if (mirroredId >= 0 && mirroredId < left_canvas_pixels.size() && !backoutSet.hasValue(mirroredId)) {
-            left_canvas_pixels.get(mirroredId).display(activePixelCol, debug, mirroredId);
-          }
-        }
-      } else {
-        // Fallback to just the current cell and its mirror
-        right_canvas_pixels.get(right_curr_id).display(activePixelCol, debug, right_curr_id);
-        int mirroredId = getMirroredPixelId(right_curr_id);
-        if (mirroredId >= 0 && mirroredId < left_canvas_pixels.size() && !backoutSet.hasValue(mirroredId)) {
-          left_canvas_pixels.get(mirroredId).display(activePixelCol, debug, mirroredId);
-        }
-      }
-    }
-  }
-
-
-  // Left & Right Separator line
+  // Draw separator line between left and right canvases
   stroke(100);
   strokeWeight(0.5);
   line(SINGLE_CANVAS_WIDTH, 0, SINGLE_CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -340,20 +210,161 @@ void draw() {
 }
 
 
-// Helper function to calculate the mirrored pixel ID
-int getMirroredPixelId(int id) {
-  // Calculate row and column from ID
-  int row = id / COLS_OF_PIXELS;
-  int col = id % COLS_OF_PIXELS;
-  // Mirror the column (horizontal mirroring)
-  int mirroredCol = (COLS_OF_PIXELS - 1) - col;
-  // Convert back to ID
-  return (row * COLS_OF_PIXELS) + mirroredCol;
+// Render all base pixels for both eyes
+void renderAllPixels() {
+  // Render left canvas pixels
+  color leftColor = debug ? DEBUG_COLOR_TYPE1 : NORMAL_PIXEL_COLOR;
+  for (int i = 0; i < leftCanvasPixels.size(); i++) {
+    leftCanvasPixels.get(i).display(leftColor, debug, i);
+
+    // Apply special colors for boundary and blackout pixels
+    if (debug && boundarySet.hasValue(i)) {
+      leftCanvasPixels.get(i).display(BOUNDARY_PIXEL_COLOR, debug, i);
+    }
+    if (backoutSet.hasValue(i)) {
+      leftCanvasPixels.get(i).display(BLACKOUT_PIXEL_COLOR, debug, i);
+    }
+  }
+
+  // Render right canvas pixels
+  color rightColor = debug ? DEBUG_COLOR_TYPE2 : NORMAL_PIXEL_COLOR;
+  for (int i = 0; i < rightCanvasPixels.size(); i++) {
+    rightCanvasPixels.get(i).display(rightColor, debug, i);
+
+    // Apply special colors for boundary and blackout pixels
+    if (debug && boundarySet.hasValue(i)) {
+      rightCanvasPixels.get(i).display(BOUNDARY_PIXEL_COLOR, debug, i);
+    }
+    if (backoutSet.hasValue(i)) {
+      rightCanvasPixels.get(i).display(BLACKOUT_PIXEL_COLOR, debug, i);
+    }
+  }
 }
 
 
-// Helper function to calculate the 4 cell IDs that form a 2x2 block (with backout list considerations)
-// Modified function to consider both backout and boundary cells
+
+void keyPressed() {
+  switch(key) {
+  case 'd':
+  case 'D':
+    debug = !debug;
+    log("DEBUG MODE: " + (debug ? "Enabled" : "Disabled"));
+    break;
+
+  case 's':
+  case 'S':
+    syncSameDirection = !syncSameDirection;
+    syncMirroredDirection = !syncSameDirection;
+    log("EYE SYNC (Same Direction): " + (syncSameDirection ? "Enabled" : "Disabled"));
+    break;
+
+  case 'm':
+  case 'M':
+    syncMirroredDirection = !syncMirroredDirection;
+    syncSameDirection = !syncMirroredDirection;
+    log("EYE SYNC (Mirrored): " + (syncMirroredDirection ? "Enabled" : "Disabled"));
+    break;
+
+  case '1':
+    int targetCell1 = (random(1) > 0.5) ? 10 : 17;
+    log("Animating to top-left position (cell " + targetCell1 + ")");
+    animateToCell(targetCell1);
+    break;
+
+  case '2':
+    int targetCell2 = (random(1) > 0.5) ? 13 : 22;
+    log("Animating to top-right position (cell " + targetCell2 + ")");
+    animateToCell(targetCell2);
+    break;
+
+  case '3':
+    int targetCell3 = (random(1) > 0.5) ? 53 : 46;
+    log("Animating to bottom-right position (cell " + targetCell3 + ")");
+    animateToCell(targetCell3);
+    break;
+
+  case '4':
+    int targetCell4 = (random(1) > 0.5) ? 50 : 41;
+    log("Animating to bottom-left position (cell " + targetCell4 + ")");
+    animateToCell(targetCell4);
+    break;
+  }
+}
+
+
+int left_curr_id = 0;
+int left_last_id = 0;
+int right_curr_id = 0;
+int right_last_id = 0;
+
+
+void mouseMoved() {
+  // First check left canvas pixels
+  boolean pixelFound = checkCanvasPixels(leftCanvasPixels, true);
+
+  // If no pixel found in left canvas, check right canvas
+  if (!pixelFound) {
+    checkCanvasPixels(rightCanvasPixels, false);
+  }
+}
+
+
+// Helper function to check if mouse is over pixels in a canvas
+boolean checkCanvasPixels(ArrayList<Pixel> canvasPixels, boolean isLeftCanvas) {
+  for (int i = 0; i < canvasPixels.size(); i++) {
+    Pixel pixel = canvasPixels.get(i);
+    int[] position = pixel.getPosition();
+    int[] size = pixel.getSize();
+
+    // Check if mouse is over this pixel
+    if (mouseX >= position[0] && mouseX <= position[0] + size[0] &&
+      mouseY >= position[1] && mouseY <= position[1] + size[1]) {
+
+      // Skip if it's a blackout or boundary pixel
+      if (backoutSet.hasValue(i) || boundarySet.hasValue(i)) {
+        return true; // We found a pixel, but it's invalid
+      }
+
+      // Update state based on which canvas we're in
+      if (isLeftCanvas) {
+        leftHit = true;
+        rightHit = false;
+
+        // Only log if the pixel has changed
+        if (leftCurrentId != i) {
+          logPixelMovement(i, leftCurrentId, true, syncMirroredDirection);
+          leftLastId = leftCurrentId;
+          leftCurrentId = i;
+        }
+      } else {
+        rightHit = true;
+        leftHit = false;
+
+        // Only log if the pixel has changed
+        if (rightCurrentId != i) {
+          logPixelMovement(i, rightCurrentId, false, syncMirroredDirection);
+          rightLastId = rightCurrentId;
+          rightCurrentId = i;
+        }
+      }
+
+      return true; // Pixel found and processed
+    }
+  }
+
+  return false; // No pixel found
+}
+
+
+// Helper function for displaying pixels with specific settings
+void displayPixel(ArrayList<Pixel> pixelArray, int pixelId, color pixelColor, boolean debugMode) {
+  if (pixelId >= 0 && pixelId < pixelArray.size()) {
+    pixelArray.get(pixelId).display(pixelColor, debugMode, pixelId);
+  }
+}
+
+
+// Helper function calculates the 4 cell IDs that form a 2x2 block around the active cell.
 int[] get2x2BlockIds(int activeId) {
   // Check if the active ID is in backout or boundary list
   if (backoutSet.hasValue(activeId) || boundarySet.hasValue(activeId)) {
@@ -366,23 +377,23 @@ int[] get2x2BlockIds(int activeId) {
   int row = activeId / COLS_OF_PIXELS;
   int col = activeId % COLS_OF_PIXELS;
 
-  // Try different positions for 2x2 block
+  // Define four possible positions for the 2x2 block
   int[][] possiblePositions = {
-    {row, col}, // Current as top-left
-    {row, col-1}, // Left as top-left
-    {row-1, col}, // Above as top-left
-    {row-1, col-1}     // Diagonal as top-left
+    {row, col}, // Current cell as top-left
+    {row, col-1}, // Left cell as top-left
+    {row-1, col}, // Above cell as top-left
+    {row-1, col-1}    // Diagonal cell as top-left
   };
 
   int bestPosition = 0;
-  int lowestInvalidCells = 4; // Start with worst case
+  int lowestInvalidCells = 4; // Start with worst case scenario
 
   // Find position with fewest invalid cells (backout OR boundary)
   for (int i = 0; i < possiblePositions.length; i++) {
     int testRow = possiblePositions[i][0];
     int testCol = possiblePositions[i][1];
 
-    // Skip if outside grid
+    // Skip if outside grid boundaries
     if (testRow < 0 || testRow >= ROWS_OF_PIXELS-1 ||
       testCol < 0 || testCol >= COLS_OF_PIXELS-1) {
       continue;
@@ -391,77 +402,178 @@ int[] get2x2BlockIds(int activeId) {
     // Count invalid cells in this configuration
     int invalidCount = 0;
     int[] testIds = new int[4];
-    testIds[0] = testRow * COLS_OF_PIXELS + testCol;
-    testIds[1] = testRow * COLS_OF_PIXELS + (testCol + 1);
-    testIds[2] = (testRow + 1) * COLS_OF_PIXELS + testCol;
-    testIds[3] = (testRow + 1) * COLS_OF_PIXELS + (testCol + 1);
 
+    // Calculate the 4 cell IDs for this potential block position
+    testIds[0] = testRow * COLS_OF_PIXELS + testCol;               // Top-left
+    testIds[1] = testRow * COLS_OF_PIXELS + (testCol + 1);         // Top-right
+    testIds[2] = (testRow + 1) * COLS_OF_PIXELS + testCol;         // Bottom-left
+    testIds[3] = (testRow + 1) * COLS_OF_PIXELS + (testCol + 1);   // Bottom-right
+
+    // Count how many cells would be invalid in this configuration
     for (int id : testIds) {
       if (backoutSet.hasValue(id) || boundarySet.hasValue(id)) {
         invalidCount++;
       }
     }
 
-    // If better position, choose it
+    // If this position has fewer invalid cells, choose it
     if (invalidCount < lowestInvalidCells) {
       lowestInvalidCells = invalidCount;
       bestPosition = i;
 
-      // Perfect position with no invalid cells
+      // Perfect position with no invalid cells - stop searching
       if (invalidCount == 0) {
         break;
       }
     }
   }
 
-  // Use best position
+  // Use the best position found
   int topLeftRow = possiblePositions[bestPosition][0];
   int topLeftCol = possiblePositions[bestPosition][1];
 
-  blockIds[0] = topLeftRow * COLS_OF_PIXELS + topLeftCol;
-  blockIds[1] = topLeftRow * COLS_OF_PIXELS + (topLeftCol + 1);
-  blockIds[2] = (topLeftRow + 1) * COLS_OF_PIXELS + topLeftCol;
-  blockIds[3] = (topLeftRow + 1) * COLS_OF_PIXELS + (topLeftCol + 1);
+  // Calculate the final block IDs
+  blockIds[0] = topLeftRow * COLS_OF_PIXELS + topLeftCol;               // Top-left
+  blockIds[1] = topLeftRow * COLS_OF_PIXELS + (topLeftCol + 1);         // Top-right
+  blockIds[2] = (topLeftRow + 1) * COLS_OF_PIXELS + topLeftCol;         // Bottom-left
+  blockIds[3] = (topLeftRow + 1) * COLS_OF_PIXELS + (topLeftCol + 1);   // Bottom-right
 
   return blockIds;
 }
 
 
+// Helper function to calculate the mirrored pixel ID for a given pixel.
+int getMirroredPixelId(int id) {
+  // Calculate row and column from ID
+  int row = id / COLS_OF_PIXELS;
+  int col = id % COLS_OF_PIXELS;
+
+  // Mirror the column position (horizontal mirroring)
+  // For example, in an 8-column grid:
+  // Col 0 becomes col 7, col 1 becomes col 6, etc.
+  int mirroredCol = (COLS_OF_PIXELS - 1) - col;
+
+  // Convert row and mirrored column back to a pixel ID
+  return (row * COLS_OF_PIXELS) + mirroredCol;
+}
 
 
-void keyPressed() {
-  if (key == 'd' || key == 'D') {
-    debug = !debug;
-    //println("DEBUG MODE: " + (debug ? "Enabled" : "Disabled"));
-    log("DEBUG MODE: " + (debug ? "Enabled" : "Disabled"));
-  } else if (key == 's' || key == 'S') {
-    syncS = !syncS;
-    syncM = !syncS;
-    log("EYE Sync: " + (syncS ? "Enabled" : "Disabled"));
-  } else if (key == 'm' || key == 'M') {
-    syncM = !syncM;
-    syncS = !syncM;
-    log("EYE Sync but Mirror: " + (syncM ? "Enabled" : "Disabled"));
+// Helper function to display a 2x2 block of pixels
+void display2x2Block(ArrayList<Pixel> pixelArray, int[] blockIds, color pixelColor, boolean debugMode) {
+  for (int id : blockIds) {
+    if (id >= 0 && id < pixelArray.size() && !backoutSet.hasValue(id)) {
+      pixelArray.get(id).display(pixelColor, debugMode, id);
+    }
+  }
+}
+
+// Helper function to handle activation of pixels in different modes
+void handlePixelActivation(int activeId, boolean isLeftCanvas) {
+  ArrayList<Pixel> primaryCanvas = isLeftCanvas ? leftCanvasPixels : rightCanvasPixels;
+  ArrayList<Pixel> secondaryCanvas = isLeftCanvas ? rightCanvasPixels : leftCanvasPixels;
+
+  // Skip if it's a blackout or boundary pixel
+  if (backoutSet.hasValue(activeId) || boundarySet.hasValue(activeId)) {
+    return;
   }
 
-  // Hotkeys for jumping to specific cells
-  else if (key == '1') {
-    int targetCell = (random(1) > 0.5) ? 10 : 17;
-    animateToCell(targetCell);
-  } else if (key == '2') {
-    int targetCell = (random(1) > 0.5) ? 13 : 22;
-    animateToCell(targetCell);
-  } else if (key == '3') {
-    int targetCell = (random(1) > 0.5) ? 53 : 46;
-    animateToCell(targetCell);
-  } else if (key == '4') {
-    int targetCell = (random(1) > 0.5) ? 50 : 41;
-    animateToCell(targetCell);
+  int[] blockIds = get2x2BlockIds(activeId);
+
+  // No sync mode - only activate on the primary canvas
+  if (!syncSameDirection && !syncMirroredDirection) {
+    if (blockIds.length > 0) {
+      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+    } else {
+      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+    }
+  }
+  // Sync same mode - activate same pixels on both canvases
+  else if (syncSameDirection) {
+    if (blockIds.length > 0) {
+      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+      display2x2Block(secondaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+    } else {
+      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+      displayPixel(secondaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+    }
+  }
+  // Mirror mode - activate mirrored pixels on secondary canvas
+  else if (syncMirroredDirection) {
+    if (blockIds.length > 0) {
+      // Primary canvas block
+      display2x2Block(primaryCanvas, blockIds, ACTIVE_PIXEL_COLOR, debug);
+
+      // Secondary canvas mirrored block
+      for (int id : blockIds) {
+        int mirroredId = getMirroredPixelId(id);
+        if (mirroredId >= 0 && mirroredId < secondaryCanvas.size() && !backoutSet.hasValue(mirroredId)) {
+          secondaryCanvas.get(mirroredId).display(ACTIVE_PIXEL_COLOR, debug, mirroredId);
+        }
+      }
+    } else {
+      // Just use single pixels
+      displayPixel(primaryCanvas, activeId, ACTIVE_PIXEL_COLOR, debug);
+      int mirroredId = getMirroredPixelId(activeId);
+      displayPixel(secondaryCanvas, mirroredId, ACTIVE_PIXEL_COLOR, debug);
+    }
+  }
+}
+
+// Helper function to log pixel movements with relevant information
+void logPixelMovement(int currentId, int lastId, boolean isLeftCanvas, boolean isMirrored) {
+  if (currentId == lastId) {
+    return; // Don't log if no change
+  }
+
+  if (syncSameDirection) {
+    log("[SYNCED] Current " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + currentId);
+    log("[SYNCED] Matching " + (isLeftCanvas ? "Right" : "Left") + " Pixel id: " + currentId);
+    log("[SYNCED] Last " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + lastId);
+    log("[SYNCED] Matching Last " + (isLeftCanvas ? "Right" : "Left") + " Pixel id: " + lastId);
+    log("");
+  } else if (syncMirroredDirection) {
+    int mirroredId = getMirroredPixelId(currentId);
+    int mirroredLastId = getMirroredPixelId(lastId);
+
+    log("[MIRROR] Current " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + currentId);
+    log("[MIRROR] Mirrored " + (isLeftCanvas ? "Right" : "Left") + " Pixel id: " + mirroredId);
+    log("[MIRROR] Last " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + lastId);
+    log("[MIRROR] Mirrored Last " + (isLeftCanvas ? "Right" : "Left") + " Pixel id: " + mirroredLastId);
+    log("");
+  } else {
+    log("Current " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + currentId);
+    log("Last " + (isLeftCanvas ? "Left" : "Right") + " Pixel id: " + lastId);
+    log("");
   }
 }
 
 
-// Ani callback functions
+// Enhanced animation function with validation
+void animateToCell(int targetCellId) {
+  // Skip invalid cells
+  if (backoutSet.hasValue(targetCellId) || boundarySet.hasValue(targetCellId)) {
+    log("Cannot animate to cell " + targetCellId + " (blackout or boundary cell)");
+    return;
+  }
+
+  // Calculate target position
+  float targetRow = targetCellId / COLS_OF_PIXELS;
+  float targetCol = targetCellId % COLS_OF_PIXELS;
+
+  // Set current position
+  cellXCurrent = leftCurrentId % COLS_OF_PIXELS;
+  cellYCurrent = leftCurrentId / COLS_OF_PIXELS;
+
+  // Start animation
+  isAnimating = true;
+  log("Animating from (" + cellXCurrent + "," + cellYCurrent + ") to (" +
+    targetCol + "," + targetRow + ") - Cell ID: " + targetCellId);
+
+  Ani.to(this, 20.0f, "cellXCurrent", targetCol, Ani.BACK_OUT, "onUpdate:updateCell");
+  Ani.to(this, 20.0f, "cellYCurrent", targetRow, Ani.BACK_OUT, "onEnd:animationComplete");
+}
+
+// Animation callback for cell updates
 void updateCell() {
   // Convert floating point position to cell index
   int row = constrain(int(cellYCurrent), 0, ROWS_OF_PIXELS - 1);
@@ -470,165 +582,27 @@ void updateCell() {
 
   // Only update if it's a valid cell
   if (!backoutSet.hasValue(cellId) && !boundarySet.hasValue(cellId)) {
-    left_curr_id = cellId;
-    left_last_id = cellId;
+    leftCurrentId = cellId;
+    leftLastId = cellId;
     leftHit = true;
     rightHit = false;
   }
 }
 
-
+// Animation completion callback
 void animationComplete() {
   isAnimating = false;
-  log("Animation complete");
+  log("Animation completed");
 }
 
 
-void animateToCell(int targetCellId) {
-  if (backoutSet.hasValue(targetCellId) || boundarySet.hasValue(targetCellId)) {
-    return; // Don't animate to invalid cells
-  }
-
-  // Calculate target position
-  float targetRow = targetCellId / COLS_OF_PIXELS;
-  float targetCol = targetCellId % COLS_OF_PIXELS;
-
-  // Set current position
-  cellXCurrent = left_curr_id % COLS_OF_PIXELS;
-  cellYCurrent = left_curr_id / COLS_OF_PIXELS;
-
-  // Start animation with correct parameter types
-  isAnimating = true;
-
-  // Note: duration must be float, target values must be float, and we need an easing
-  Ani.to(this, 20.0f, "cellXCurrent", targetCol, Ani.BACK_OUT, "onUpdate:updateCell");
-  Ani.to(this, 20.0f, "cellYCurrent", targetRow, Ani.BACK_OUT, "onEnd:animationComplete");
-
-  log("Animating to cell ID: " + targetCellId);
-}
-
-
-int left_curr_id = 0;
-int left_last_id = 0;
-int right_curr_id = 0;
-int right_last_id = 0;
-boolean leftHit = false;
-boolean rightHit = false;
-
-
-void mouseMoved() {
-  boolean foundNewValidPosition = false;
-
-  // Check left canvas
-  for (int i = 0; i < left_canvas_pixels.size(); i++) {
-    int cur_pixel_x = left_canvas_pixels.get(i).getPosition()[0];
-    int cur_pixel_y = left_canvas_pixels.get(i).getPosition()[1];
-    int cur_pixel_w = left_canvas_pixels.get(i).getSize()[0];
-    int cur_pixel_h = left_canvas_pixels.get(i).getSize()[1];
-
-    if (mouseX >= cur_pixel_x && mouseX <= cur_pixel_x+cur_pixel_w &&
-      mouseY >= cur_pixel_y && mouseY <= cur_pixel_y+cur_pixel_h) {
-      // We found the cell the mouse is over on the left canvas
-
-      // Only update if it's a valid cell (not in backout or boundary)
-      if (!backoutSet.hasValue(i) && !boundarySet.hasValue(i)) {
-        foundNewValidPosition = true;
-        left_curr_id = i;
-        leftHit = true;
-        rightHit = false;
-
-        if (left_curr_id != left_last_id) {
-          // Print debug info as appropriate based on the mode
-          if (syncS) {
-            log("[SYNCED] Current Left Pixel id: " + left_curr_id);
-            log("[SYNCED] Matching Right Pixel id: " + left_curr_id);
-            log("[SYNCED] Last Left Pixel id: " + left_last_id);
-            log("[SYNCED] Matching Last Right Pixel id: " + left_last_id);
-            log("");
-          } else if (syncM) {
-            int mirroredId = getMirroredPixelId(left_curr_id);
-            int mirroredLastId = getMirroredPixelId(left_last_id);
-
-            log("[MIRROR] Current Left Pixel id: " + left_curr_id);
-            log("[MIRROR] Mirrored Right Pixel id: " + mirroredId);
-            log("[MIRROR] Last Left Pixel id: " + left_last_id);
-            log("[MIRROR] Mirrored Last Right Pixel id: " + mirroredLastId);
-            log("");
-          } else {
-            log("Current Left Pixel id: " + left_curr_id);
-            log("Last Left Pixel id: " + left_last_id);
-            log("");
-          }
-          left_last_id = left_curr_id;
-        }
-      }
-      break;
-    }
-  }
-
-  // Check right canvas if we didn't find a valid position on the left
-  if (!foundNewValidPosition) {
-    for (int i = 0; i < right_canvas_pixels.size(); i++) {
-      int cur_pixel_x = right_canvas_pixels.get(i).getPosition()[0];
-      int cur_pixel_y = right_canvas_pixels.get(i).getPosition()[1];
-      int cur_pixel_w = right_canvas_pixels.get(i).getSize()[0];
-      int cur_pixel_h = right_canvas_pixels.get(i).getSize()[1];
-
-      if (mouseX >= cur_pixel_x && mouseX <= cur_pixel_x+cur_pixel_w &&
-        mouseY >= cur_pixel_y && mouseY <= cur_pixel_y+cur_pixel_h) {
-        // We found the cell the mouse is over on the right canvas
-
-        // Only update if it's a valid cell (not in backout or boundary)
-        if (!backoutSet.hasValue(i) && !boundarySet.hasValue(i)) {
-          foundNewValidPosition = true;
-          right_curr_id = i;
-          rightHit = true;
-          leftHit = false;
-
-          if (right_curr_id != right_last_id) {
-            // Print debug info as appropriate
-            if (syncS) {
-              log("[SYNCED] Current Right Pixel id: " + right_curr_id);
-              log("[SYNCED] Matching Left Pixel id: " + right_curr_id);
-              log("[SYNCED] Last Right Pixel id: " + right_last_id);
-              log("[SYNCED] Matching Last Left Pixel id: " + right_last_id);
-              log("");
-            } else if (syncM) {
-              int mirroredId = getMirroredPixelId(right_curr_id);
-              int mirroredLastId = getMirroredPixelId(right_last_id);
-
-              log("[MIRROR] Current Right Pixel id: " + right_curr_id);
-              log("[MIRROR] Mirrored Left Pixel id: " + mirroredId);
-              log("[MIRROR] Last Right Pixel id: " + right_last_id);
-              log("[MIRROR] Mirrored Last Left Pixel id: " + mirroredLastId);
-              log("");
-            } else {
-              log("Current Right Pixel id: " + right_curr_id);
-              log("Last Right Pixel id: " + right_last_id);
-              log("");
-            }
-            right_last_id = right_curr_id;
-          }
-        }
-        break;
-      }
-    }
-  }
-
-  // Important: If we didn't find a new valid position, we don't update
-  // leftHit and rightHit, which creates the "sticky" behavior.
-  // They will retain their previous values.
-}
-
-
-
-
+// Improved MQTT connection function with better error handling
 void connectMQTT() {
   lastConnectionAttempt = millis();
 
   try {
     log("Attempting to connect to MQTT broker...");
-    client.connect("mqtt://" + BROKER_IP + ":" + BROKER_PORT, CLIENT_ID);
+    mqttClient.connect("mqtt://" + BROKER_IP + ":" + BROKER_PORT, CLIENT_ID);
 
     mqttConnected = true;
     mqttState = true;
@@ -637,10 +611,11 @@ void connectMQTT() {
     mqttConnected = false;
     mqttState = false;
     log("Failed to connect to MQTT broker: " + e.getMessage());
-    log("Will retry in " + (connectionRetryInterval/1000) + " seconds");
+    log("Will retry in " + (CONNECTION_RETRY_INTERVAL/1000) + " seconds");
   }
 }
 
+// Called when MQTT client successfully connects
 void clientConnected() {
   mqttState = true;
   log("MQTT client connected");
@@ -648,15 +623,15 @@ void clientConnected() {
   log("\tmicrophones/left");
   log("\tmicrophones/right");
   log("\tmicrophones/status");
-  //log("\tmicrophones/ping");
-  client.subscribe("microphones/left");
-  client.subscribe("microphones/right");
-  client.subscribe("microphones/status");
-  //client.subscribe("microphones/ping");
+  mqttClient.subscribe("microphones/left");
+  mqttClient.subscribe("microphones/right");
+  mqttClient.subscribe("microphones/status");
 }
 
+
+// Process incoming MQTT messages
 void messageReceived(String topic, byte[] payload) {
-  log("new MQTT message: " + topic + " - " + new String(payload));
+  log("New MQTT message: " + topic + " - " + new String(payload));
 
   // Check if it's one of the microphone topics
   if (topic.equals("microphones/left") || topic.equals("microphones/right")) {
@@ -691,6 +666,7 @@ void messageReceived(String topic, byte[] payload) {
   }
 }
 
+// MQTT connection lost handler
 void connectionLost() {
   mqttState = false;
   log("MQTT connection lost");

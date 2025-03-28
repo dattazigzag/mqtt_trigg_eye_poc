@@ -1,40 +1,80 @@
+/**
+ * Pixel class represents a single cell in the eye grid.
+ * It handles its own rendering and state management.
+ */
 class Pixel {
-  int x, y, w, h;
-  Pixel (int x, int y, int w, int h) {
+  private int x, y;           // Position of the pixel
+  private int width, height;  // Dimensions of the pixel
+
+  /**
+   * Constructor to create a new pixel
+   *
+   * @param x      X-coordinate position
+   * @param y      Y-coordinate position
+   * @param width  Width of the pixel
+   * @param height Height of the pixel
+   */
+  Pixel(int x, int y, int width, int height) {
     this.x = x;
     this.y = y;
-    this.w = w;
-    this.h = h;
+    this.width = width;
+    this.height = height;
   }
 
-  void display(color c, boolean debug, int id) {
+  /**
+   * Display the pixel with the specified color
+   *
+   * @param pixelColor Color to fill the pixel with
+   * @param debug      Whether to show debug information
+   * @param id         Pixel ID to display in debug mode
+   */
+  void display(color pixelColor, boolean debug, int id) {
     noStroke();
     if (debug) {
       strokeWeight(0.5);
       stroke(0);
     }
-    fill(c);
+
+    fill(pixelColor);
+
     pushMatrix();
     translate(x, y);
-    rect(0, 0, w, h);
+    rect(0, 0, width, height);
+
+    // Draw the ID in debug mode
     if (debug) {
       fill(255);
-      text(id, w/2-5, h/2+5);
+      textAlign(CENTER, CENTER);
+      text(id, width/2, height/2);
     }
+
     popMatrix();
   }
 
+  /**
+   * Get the pixel's position
+   *
+   * @return Array containing [x, y] coordinates
+   */
   int[] getPosition() {
-    int[] position = {x, y};
-    return (position);
+    return new int[]{x, y};
   }
 
+  /**
+   * Get the pixel's dimensions
+   *
+   * @return Array containing [width, height] values
+   */
   int[] getSize() {
-    int[] size = {w, h};
-    return (size);
+    return new int[]{width, height};
   }
-  
-  void setColor(color c){
-    fill(c);
+
+  /**
+   * Set the pixel's color (used for immediate rendering)
+   *
+   * @param pixelColor The color to set
+   */
+  void setColor(color pixelColor) {
+    fill(pixelColor);
   }
 }

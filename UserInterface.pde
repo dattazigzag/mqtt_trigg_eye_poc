@@ -1,25 +1,36 @@
-// User Interface class to manage all controls
+/**
+ * UserInterface class manages the application's UI components and console.
+ */
 class UserInterface {
-  PApplet parent;
-  int x, y, width, height;
-  ControlP5 cp5;
+  // References and positioning
+  //private PApplet parent;
+  private int x, y, width, height;
+  private ControlP5 cp5;
   Textarea console;
 
-  // Colors
-  color bgColor = color(25);
-  color textColor = color(220);
-  color disabledColor = color(15);
-  color dimmedTextColor = color(120); // Dimmed text color for disabled fields
+  // UI Colors
+  private final color BG_COLOR = color(25);
+  private final color TEXT_COLOR = color(220);
+  //private final color DISABLED_COLOR = color(15);
+  //private final color DIMMED_TEXT_COLOR = color(120);
 
-  // Control dimensions
-  int padding = 12;
-  int elementHeight = 20;
-  int buttonWidth = 80;
-  int rowHeight = 38;
+  // Layout constants
+  private final int PADDING = 12;
+  //private final int ELEMENT_HEIGHT = 20;
+  //private final int BUTTON_WIDTH = 80;
+  private final int ROW_HEIGHT = 38;
 
-
+  /**
+   * Constructor for the UserInterface
+   *
+   * @param parent   Parent PApplet reference
+   * @param x        X-coordinate position
+   * @param y        Y-coordinate position
+   * @param width    Width of the UI area
+   * @param height   Height of the UI area
+   */
   UserInterface(PApplet parent, int x, int y, int width, int height) {
-    this.parent = parent;
+    //this.parent = parent;
     this.x = x;
     this.y = y;
     this.width = width;
@@ -32,48 +43,69 @@ class UserInterface {
     setupControls();
   }
 
+  /**
+   * Render the UI elements
+   */
   void render() {
     // Draw the background for the UI area
-    fill(bgColor);
+    fill(BG_COLOR);
     rect(x, y, width, height);
 
     // Draw divider line before settings
-    stroke(textColor, 100); // Semi-transparent color
+    stroke(TEXT_COLOR, 100); // Semi-transparent color
     strokeWeight(0.25);
-    line(x, y + padding + rowHeight*2, x + width, y + padding + rowHeight*2);
+    line(x, y + PADDING + ROW_HEIGHT*2, x + width, y + PADDING + ROW_HEIGHT*2);
     noStroke();
 
+    // Display MQTT information
+    renderMqttStatus();
 
-    // MQTT details
-    fill(ui.textColor);
-    String broker_details = "MQTT BROKER: " + "mqtt://" + BROKER_IP + ":" + BROKER_PORT;
-    text(broker_details, 12, CANVAS_HEIGHT + 20);
-    String client_stst_label = "MQTT STATE: ";
-    text(client_stst_label, 12, CANVAS_HEIGHT + 38);
+    // Display control instructions
+    renderControlInstructions();
+  }
 
-    String stat = "";
+  /**
+   * Render MQTT status information
+   */
+  private void renderMqttStatus() {
+    // MQTT connection details
+    fill(TEXT_COLOR);
+    String brokerDetails = "MQTT BROKER: " + "mqtt://" + BROKER_IP + ":" + BROKER_PORT;
+    text(brokerDetails, 12, CANVAS_HEIGHT + 20);
+
+    String clientStateLabel = "MQTT STATE: ";
+    text(clientStateLabel, 12, CANVAS_HEIGHT + 38);
+
+    // Display connection status with appropriate color
     if (!mqttState) {
-      fill(255, 135, 76);
-      stat = "DISCONNECTED";
+      fill(255, 135, 76); // Orange/red for disconnected
+      text("DISCONNECTED", 12 + 80, CANVAS_HEIGHT + 38);
     } else {
-      fill(76, 135, 255);
-      stat = "CONNECTED";
+      fill(76, 135, 255); // Blue for connected
+      text("CONNECTED", 12 + 80, CANVAS_HEIGHT + 38);
     }
-    text(stat, 12 + 80, CANVAS_HEIGHT + 38);
-    // dividers
+
+    // Dividers
     stroke(100);
     strokeWeight(0.5);
     line(0, CANVAS_HEIGHT + 38 + 10, SKETCH_WIDTH, CANVAS_HEIGHT + 38 + 10);
     line(0, CANVAS_HEIGHT + 38 + 80, SKETCH_WIDTH, CANVAS_HEIGHT + 38 + 80);
-    
-    // control instructions
-    fill(ui.textColor);
+  }
+
+  /**
+   * Render control instructions
+   */
+  private void renderControlInstructions() {
+    fill(TEXT_COLOR);
     text("PRESS 'd'/'D' to enable/disable DEBUG VIEW", 12, CANVAS_HEIGHT + 38 + 25);
     text("PRESS 'm'/'M' to mirror/sync PUPILS", 12, CANVAS_HEIGHT + 38 + 25 + 15);
     text("PRESS '1'/'2'/'3'/'4' to make PUPILS go to extreme corners", 12, CANVAS_HEIGHT + 38 + 25 + 15 + 15);
   }
 
-  void setupControls() {
+  /**
+   * Set up the UI controls
+   */
+  private void setupControls() {
     // Control styles
     cp5.setColorForeground(color(50));
     cp5.setColorBackground(color(50));
@@ -83,28 +115,28 @@ class UserInterface {
     setupConsole();
   }
 
-  void setupConsole() {
+  /**
+   * Set up the console area
+   */
+  private void setupConsole() {
     // Create console in the highlighted area
-    int consoleX = padding;  // Right side of UI
-    int consoleY = y + padding + rowHeight*2 + 35;  // Below ARTNET DMX SETTINGS label
-    int consoleWidth = width - padding*2;
-    int consoleHeight = 100;  // Adjust as needed to fit the area
+    int consoleX = PADDING;
+    int consoleY = y + PADDING + ROW_HEIGHT*2 + 35;
+    int consoleWidth = width - PADDING*2;
+    int consoleHeight = 100;
 
     // Create a textarea to serve as console
     console = cp5.addTextarea("console")
       .setPosition(consoleX, consoleY)
       .setSize(consoleWidth, consoleHeight)
-      //.setFont(createFont("", 10))
       .setLineHeight(14)
       .setColor(color(200))  // Text color
-      //.setColorBackground(color(150, 50))    // Same as UI background
-      .setColorForeground(color(255, 100))  // Scroll bar color - semi-transparent magenta
+      .setColorForeground(color(255, 100))  // Scroll bar color
       .scroll(1.0)                    // Enable scrolling
       .showScrollbar();               // Show scrollbar
 
-    // Add a thin magenta border - ControlP5 Textarea doesn't support borders directly,
-    // but we can use styling to make it look like it has one
-    console.getCaptionLabel().setText("");  // No caption text
+    // Remove caption text
+    console.getCaptionLabel().setText("");
 
     // Set console as global reference
     appConsole = console;
@@ -115,20 +147,32 @@ class UserInterface {
     printToConsole("-------------------------------");
   }
 
+  /**
+   * Print a message to the console
+   *
+   * @param message The message to print
+   */
   void printToConsole(String message) {
     String formattedMessage = message + "\n";
     console.append(formattedMessage);
-    // Scroll to bottom - this ensures newest messages are visible
+
+    // Scroll to bottom to ensure newest messages are visible
     console.scroll(1.0);
+
     // Auto-clear if buffer exceeds limit
     if (countLines(console.getText()) > CONSOLE_BUFFER_LIMIT) {
       console.clear();
-      //console.append("[" + timestamp + "] Console buffer limit reached. Cleared.\n");
       console.append("Console buffer limit reached. Cleared.\n");
     }
   }
 
-  int countLines(String text) {
+  /**
+   * Count the number of lines in a text string
+   *
+   * @param text Text to count lines in
+   * @return Number of lines
+   */
+  private int countLines(String text) {
     if (text == null || text.isEmpty()) return 0;
     return text.split("\n").length;
   }
