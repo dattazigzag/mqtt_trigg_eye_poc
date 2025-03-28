@@ -3,6 +3,8 @@ import mqtt.*;
 import processing.data.JSONObject;
 import controlP5.*;
 
+PGraphics pg;
+
 // ===================== CONFIGURATION CONSTANTS =====================
 // Canvas and sizing constants
 final int SKETCH_WIDTH = 640;
@@ -118,6 +120,9 @@ void setup() {
 
   // Initialize MQTT client
   initializeMqtt();
+
+  //
+  pg = createGraphics(320, 320, P3D);
 }
 
 
@@ -130,6 +135,12 @@ void initializePixelGrids() {
   for (int y = 0; y < CANVAS_HEIGHT; y += pixelHeight) {
     for (int x = 0; x < SINGLE_CANVAS_WIDTH; x += pixelWidth) {
       leftCanvasPixels.add(new Pixel(x, y, pixelWidth, pixelHeight));
+      //
+      //pg.beginDraw();
+      //pg.background(100);
+      //pg.stroke(255);
+      //pg.line(20, 20, mouseX, mouseY);
+      //pg.endDraw()
     }
   }
 

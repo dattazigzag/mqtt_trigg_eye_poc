@@ -36,13 +36,19 @@ class Pixel {
     }
 
     fill(pixelColor);
-    rect(x, y, width, height);
+
+    pushMatrix();
+    translate(x, y);
+    rect(0, 0, width, height);
+
     // Draw the ID in debug mode
     if (debug) {
       fill(255);
       textAlign(CENTER, CENTER);
-      text(id, x + 10, y + 10);
+      text(id, width/2, height/2);
     }
+
+    popMatrix();
   }
 
   /**
