@@ -2,6 +2,9 @@ import de.looksgood.ani.*;
 import mqtt.*;
 import processing.data.JSONObject;
 import controlP5.*;
+// Syphon library for sharing PGraphics canvas
+// ** Mac Only - Processing 4 for Intel X86 Architecture
+// ** Till someone makes a syphon Lib for Apple silicon
 import codeanticode.syphon.*;
 
 
